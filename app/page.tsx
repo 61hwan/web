@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useGLTF, ScrollControls, Scroll, useScroll } from '@react-three/drei';
