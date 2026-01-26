@@ -35,15 +35,33 @@ export function ChatBot({ isLoading, setIsLoading }: ChatBotProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chatInput: inputValue }),
-      });
+    });
 
       if (!response.ok) throw new Error("네트워크 응답이 좋지 않습니다.");
 
-      const data = await response.json();
-      setMessages(prev => [...prev, { 
+        const data = await response.json();
+        console.log("n8n에서 온 데이터:", data); // Array(1) 확인용
+
+        // 1. 배열 형태인지 확인하고 첫 번째 항목을 가져옵니다.
+        const result = Array.isArray(data) ? data[0] : data;
+
+        // 2. 만약 n8n에서 'error' 필드가 왔다면 raw_text를 보여주도록 방어 코드를 짭니다.
+        const finalMessage = result.explanation_text || result.raw_text || "응답 내용이 비어있습니다.";
+
+        setMessages(prev => [...prev, { 
         role: 'ai', 
-        text: data.output || data.response || "응답을 처리할 수 없습니다." 
-      }]);
+        text: finalMessage 
+        }]);
+        // 파싱 실패 시에도 텍스트가 나올 수 있도록 fallback 설정
+        const textToDisplay = result.explanation_text || result.raw_text || "답변을 가져오지 못했습니다.";
+
+
+        console.log("n8n에서 온 데이터:", data);
+
+        // 3. 머메이드 코드는 나중에 렌더링을 위해 콘솔에만 찍어둡니다.
+        if (result.mermaid_code) {
+        console.log("받은 머메이드 코드:", result.mermaid_code);
+        }
 
     } catch (error) {
       console.error("n8n 연결 에러:", error);
@@ -52,12 +70,12 @@ export function ChatBot({ isLoading, setIsLoading }: ChatBotProps) {
       setIsLoading(false);
     }
   };
-
-  return (
+return (
     <div style={{
-      width: '100%',
+      width: '95%',            // 모바일에서 양옆에 약간의 여백을 줌
       maxWidth: '1000px',
-      height: '800px',
+      height: '80vh',          // 고정 px 대신 화면 높이의 80%를 사용 (중요!)
+      maxHeight: '800px',      // 너무 커지지 않게 최대치만 제한
       background: 'rgba(255, 255, 255, 0.05)',
       backdropFilter: 'blur(15px)',
       borderRadius: '28px',
@@ -67,55 +85,80 @@ export function ChatBot({ isLoading, setIsLoading }: ChatBotProps) {
       overflow: 'hidden',
       pointerEvents: 'auto',
       boxShadow: '0 25px 60px rgba(0,0,0,0.3)',
-      color: 'white'
+      color: 'white',
+      margin: '0 auto'         // 화면 가운데 정렬
     }}>
       {/* 헤더 */}
       <div style={{ padding: '20px', borderBottom: '1px solid rgba(255,255,255,0.1)', fontWeight: 'bold', textAlign: 'center' }}>
         AHA! 학습 코치 (n8n 연결됨)
       </div>
 
-      {/* 메시지창 - scrollRef 연결 */}
+{/* 메시지창 - scrollRef 연결 */}
       <div 
         ref={scrollRef}
-        style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}
+        style={{ 
+          flex: 1, 
+          padding: '15px', // 패딩 약간 축소
+          overflowY: 'auto', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '10px' // 간격 미세 조정
+        }}
       >
         {messages.map((msg, i) => (
           <div key={i} style={{
             alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
             background: msg.role === 'user' ? '#007AFF' : 'rgba(255,255,255,0.13)',
-            padding: '12px 18px',
+            padding: '10px 14px', // 모바일 가독성을 위해 패딩 최적화
             borderRadius: '18px',
             borderBottomRightRadius: msg.role === 'user' ? '4px' : '18px',
             borderBottomLeftRadius: msg.role === 'ai' ? '4px' : '18px',
-            maxWidth: '85%',
-            fontSize: '1.1rem',
-            lineHeight: '1.4'
+            maxWidth: '90%', // 모바일에서 너무 좁지 않게 확장
+            fontSize: '1rem', // 표준 크기로 조정
+            lineHeight: '1.5', // 가독성 향상
+            wordBreak: 'break-word' // 긴 단어 깨짐 방지
           }}>
             {msg.text}
           </div>
         ))}
-        {isLoading && <div style={{ opacity: 0.5, fontSize: '0.9rem' }}>AI가 생각 중입니다...</div>}
+        {isLoading && (
+          <div style={{ 
+            opacity: 0.5, 
+            fontSize: '0.85rem', 
+            paddingLeft: '5px' 
+          }}>
+            AI가 생각 중입니다...
+          </div>
+        )}
       </div>
 
       {/* 입력창 영역 */}
-      <div style={{ padding: '20px', background: 'rgba(0,0,0,0.2)' }}>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+      <div style={{ 
+        padding: '12px 15px', // 위아래 여백 최적화
+        background: 'rgba(0,0,0,0.2)',
+        borderTop: '1px solid rgba(255,255,255,0.05)',
+        width: '100%',        // 부모 너비에 맞춤
+        boxSizing: 'border-box' // 패딩이 너비에 포함되도록 설정 (매우 중요!)
+      }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%'}}>
           <input 
             type="text" 
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleSend(); }}
-            placeholder={isLoading ? "생각 중..." : "질문을 입력하세요..."}
+            placeholder={isLoading ? "생각 중..." : "메시지 입력..."}
             disabled={isLoading}
             style={{ 
               flex: 1, 
-              padding: '15px 20px', 
+              minWidth: 0,     // flex 아이템이 부모를 뚫고 나가는 현상 방지
+              padding: '12px 16px', // 모바일에서 너무 크지 않게 조정
               background: 'rgba(255,255,255,0.1)', 
               border: 'none', 
               borderRadius: '12px',
               color: 'white', 
-              fontSize: '1.1rem',
-              outline: 'none'
+              fontSize: '1rem', // 모바일 자동 줌 방지를 위해 1rem 유지
+              outline: 'none',
+              WebkitAppearance: 'none' // iOS 입력창 기본 스타일 제거
             }}
           />
           
@@ -123,7 +166,7 @@ export function ChatBot({ isLoading, setIsLoading }: ChatBotProps) {
             onClick={handleSend}
             disabled={isLoading}
             style={{
-              padding: '15px 20px',
+              padding: '12px 18px',
               background: isLoading ? 'rgba(255,255,255,0.1)' : '#007AFF',
               color: 'white',
               border: 'none',
@@ -133,7 +176,8 @@ export function ChatBot({ isLoading, setIsLoading }: ChatBotProps) {
               transition: 'all 0.2s',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              minWidth: '60px' // 버튼이 너무 작아지지 않게 고정
             }}
           >
             {isLoading ? "..." : "전송"}

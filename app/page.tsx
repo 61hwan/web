@@ -13,41 +13,44 @@ import { ChatBot } from './ChatBot';
 const vertexShader = `
   uniform float uTime;
   uniform float uScroll;
-  uniform vec3 uMouse;
+  uniform vec2 uMouse; // vec3에서 vec2로 수정 (일반적인 Three.js 설정)
   
   attribute float aRandom;
   varying vec3 vPosition;
 
   void main() {
     vPosition = position;
-    vec3 pos = position;
+    vec3 pos = position; 
 
-    // 1. 스크롤 폭발 효과 (Scroll Explosion)
-    // 스크롤 값이 커질수록 입자가 사방으로 흩어짐
-    float explosion = 0.5 + uScroll * 3.0; 
-    pos.x += cos(uTime * 0.5 + pos.y) * explosion * aRandom;
-    pos.z += sin(uTime * 0.5 + pos.x) * explosion * aRandom;
-    pos.y += sin(uTime * 0.2 + pos.z) * explosion * 0.5;
-
-    // 2. 마우스 인터랙션 (Mouse Repulsion)
-    // 마우스와 입자 사이의 거리를 계산
-    float dist = distance(pos.xy, uMouse.xy * 4.0);
-    // 거리가 가까울수록 강하게 반응 (0.0 ~ 2.0 범위)
-    float hover = 1.0 - smoothstep(0.0, 1.5, dist);
+    // 1. 스크롤 폭발 효과 (Safe Explosion)
+    // uScroll이 이상값을 가질 경우를 대비해 0.0 ~ 10.0 사이로 제한
+    float safeScroll = clamp(uScroll, 0.0, 10.0);
+    float explosion = 0.5 + safeScroll * 2.0; 
     
-    // 마우스가 닿으면 입자가 앞으로(z축) 튀어나오고 흔들림
-    pos.z += hover * 1.0;
-    pos.x += cos(uTime * 1.0) * hover * 0.5;
+    pos.x += cos(uTime * 0.2 + position.y) * explosion * aRandom;
+    pos.z += sin(uTime * 0.2 + position.x) * explosion * aRandom;
+    pos.y += sin(uTime * 0.2 + position.z) * explosion * 0.5;
 
-    // 3. 기본 물결 움직임 (Always Moving)
-    pos.y += sin(uTime + pos.x * 1.5) * 0.1;
+    // 2. 마우스 인터랙션 (Safe Repulsion)
+    float dist = distance(pos.xy, uMouse * 4.0);
+    float h = 1.0 - smoothstep(0.0, 1.5, dist);
+    // isnan 대신 범위 체크로 안전장치
+    if (h < 0.0 || h > 1.0) h = 0.0; 
+
+    pos.z += h * 0.9;
+    pos.x += cos(uTime * 1.0) * (1.0 - h) * 0.5;
+
+    // 3. 전 방향 물결 움직임
+    pos.x += sin(uTime + position.z) * 0.03;
+    pos.y += sin(uTime + position.x) * 0.03;
+    pos.z += cos(uTime + position.y) * 0.03;
 
     vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
     gl_Position = projectionMatrix * mvPosition;
-    
-    // 4. 입자 크기 설정
-    // 기본 크기 + 랜덤 크기 + 마우스 반응 시 커짐 + 원근감 적용
-    gl_PointSize = (30.0 * aRandom + 5.0) * (1.0 + hover) * (1.0 / -mvPosition.z);
+
+    // 4. 입자 크기 조절 (0으로 나누기 및 원근감 보정)
+    float sizeFactor = (30.0 * aRandom + 5.0) * (1.0 + h);
+    gl_PointSize = sizeFactor * (1.0 / max(0.1, -mvPosition.z));
   }
 `;
 
@@ -134,48 +137,97 @@ export function InteractiveParticles({ modelPath, isLoading, color1, color2 }: a
   }, []);
 
   // 4. 파티클 지오메트리 생성 (모델 추출 및 회전)
-  const particles = useMemo(() => {
-    let sourceMesh: THREE.Mesh | null = null;
-    scene.traverse((child: any) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
-        if (!sourceMesh || mesh.geometry.attributes.position.count > sourceMesh.geometry.attributes.position.count) {
-          sourceMesh = mesh;
-        }
+  // [1] Hook들은 반드시 컴포넌트의 가장 위(Top Level)에 배치합니다.
+const [isMobile, setIsMobile] = useState(false);
+
+useEffect(() => {
+  const checkMobile = () => setIsMobile(window.innerWidth < 768);
+  checkMobile();
+  window.addEventListener('resize', checkMobile);
+  return () => window.removeEventListener('resize', checkMobile);
+}, []);
+
+// [2] 그 다음에 계산 로직(useMemo)이 옵니다.
+const particles = useMemo(() => {
+  let sourceMesh: THREE.Mesh | null = null;
+  scene.traverse((child: any) => {
+    if ((child as THREE.Mesh).isMesh) {
+      const mesh = child as THREE.Mesh;
+      if (!sourceMesh || mesh.geometry.attributes.position.count > sourceMesh.geometry.attributes.position.count) {
+        sourceMesh = mesh;
       }
-    });
-
-    if (!sourceMesh) return null;
-   const sourceGeo = (sourceMesh as THREE.Mesh).geometry as THREE.BufferGeometry;
-    const sourcePos = sourceGeo.attributes.position;
-    const sourceCount = sourcePos.count;
-    const particleCount = 20000; 
-    const newPositions = new Float32Array(particleCount * 3);
-    const newRandoms = new Float32Array(particleCount);
-
-    for (let i = 0; i < particleCount; i++) {
-      const sourceIndex = Math.floor(Math.random() * sourceCount);
-      newPositions[i * 3] = sourcePos.getX(sourceIndex);
-      newPositions[i * 3 + 1] = sourcePos.getY(sourceIndex);
-      newPositions[i * 3 + 2] = sourcePos.getZ(sourceIndex);
-      newRandoms[i] = Math.random();
     }
+  });
 
-    const newGeo = new THREE.BufferGeometry();
-    newGeo.setAttribute('position', new THREE.BufferAttribute(newPositions, 3));
-    newGeo.setAttribute('aRandom', new THREE.BufferAttribute(newRandoms, 1));
-    
-    newGeo.computeBoundingSphere();
-    const radius = newGeo.boundingSphere?.radius || 1;
-    const scaleFactor = 3.0 / radius;
-    newGeo.scale(scaleFactor, scaleFactor, scaleFactor);
-    newGeo.center();
-    newGeo.rotateY(Math.PI); // 모델 180도 회전
+  if (!sourceMesh) return null;
 
-    return newGeo;
-  }, [scene]);
+  const sourceGeo = (sourceMesh as THREE.Mesh).geometry as THREE.BufferGeometry;
+  const sourcePos = sourceGeo.attributes.position;
+  const sourceCount = sourcePos.count;
+  const particleCount = 20000; 
+  const newPositions = new Float32Array(particleCount * 3);
+  const newRandoms = new Float32Array(particleCount);
 
+  for (let i = 0; i < particleCount; i++) {
+    const sourceIndex = Math.floor(Math.random() * sourceCount);
+    newPositions[i * 3] = sourcePos.getX(sourceIndex);
+    newPositions[i * 3 + 1] = sourcePos.getY(sourceIndex);
+    newPositions[i * 3 + 2] = sourcePos.getZ(sourceIndex);
+    newRandoms[i] = Math.random();
+  }
 
+  // 지오메트리 생성 및 설정
+  const newGeo = new THREE.BufferGeometry();
+  newGeo.setAttribute('position', new THREE.BufferAttribute(newPositions, 3));
+  newGeo.setAttribute('aRandom', new THREE.BufferAttribute(newRandoms, 1));
+
+  // 회전 및 정렬 로직 (여기 넣으시면 됩니다)
+  newGeo.computeBoundingSphere();
+  const radius = newGeo.boundingSphere?.radius || 1;
+  newGeo.scale(1.0 / radius, 1.0 / radius, 1.0 / radius);
+  newGeo.center();
+  newGeo.rotateY(Math.PI * 1.2);
+  newGeo.rotateX(Math.PI * -0.1);
+
+  return newGeo; // 최종 결과물 반환
+
+}, [scene]); // <--- 괄호와 세미콜론 누락 해결!
+// --- 2. useMemo: 모델 데이터 계산만 수행하세요 ---
+const newGeo = useMemo(() => {
+  const tempPositions: number[] = [];
+  scene.traverse((child: any) => {
+    if (child.isMesh) {
+      const pos = child.geometry.attributes.position.array;
+      for (let i = 0; i < pos.length; i += 3) { // i += 3 필수!
+        tempPositions.push(pos[i], pos[i + 1], pos[i + 2]);
+      }
+    }
+  });
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(tempPositions), 3));
+
+  // 랜덤 속성 추가 (입자 효과용)
+  const newRandoms = new Float32Array(tempPositions.length / 3);
+  for (let i = 0; i < newRandoms.length; i++) newRandoms[i] = Math.random();
+  geo.setAttribute('aRandom', new THREE.BufferAttribute(newRandoms, 1));
+
+  // --- 지오메트리 변형 로직 (여기로 이동) ---
+  geo.computeBoundingSphere();
+  const radius = geo.boundingSphere?.radius || 1;
+
+  // 기기 구분 없이 일단 크기를 1로 표준화
+  const scaleFactor = 1.0 / radius; 
+  geo.scale(scaleFactor, scaleFactor, scaleFactor);
+
+  geo.center(); // 중앙 정렬
+
+  // 왼쪽 위를 보게 하는 회전 (한 번만 수행)
+  geo.rotateY(Math.PI * 1.2); 
+  geo.rotateX(Math.PI * -0.1); 
+
+  return geo; // 최종 결과물 반환
+}, [scene]);
 
 
   // 5. 매 프레임 애니메이션 처리
@@ -184,12 +236,12 @@ export function InteractiveParticles({ modelPath, isLoading, color1, color2 }: a
 
     // 1. [추가] 스크롤에 따른 회전 (가장 중요!)
     // scroll.offset(0~1)에 따라 360도(Math.PI * 2) 회전합니다.
-    pointsRef.current.rotation.y = scroll.offset * Math.PI * 1.2
-    pointsRef.current.rotation.x = scroll.offset * 0.6;
-    pointsRef.current.rotation.z = scroll.offset * 0.6;
+    pointsRef.current.rotation.y = scroll.offset * Math.PI * 0.6
+    pointsRef.current.rotation.x = scroll.offset * Math.PI * 0.6
+    pointsRef.current.rotation.z = scroll.offset * Math.PI * 0.6
 
-    // AI 답변 중(isLoading)일 때 속도 6배 가속 (0.5 -> 3.0)
-    const targetSpeed = isLoading ? 2.5 : 0.5;
+    // AI 답변 중(isLoading)일 때 속도 4배 가속
+    const targetSpeed = isLoading ? 4.0 : 1.0;
     materialRef.current.uniforms.uTime.value += delta * targetSpeed;
 
     // 스크롤 및 마우스 연동
@@ -203,6 +255,7 @@ export function InteractiveParticles({ modelPath, isLoading, color1, color2 }: a
     if (isLoading) {
       pointsRef.current.position.x = Math.sin(state.clock.elapsedTime * 3.0) * 0.03;
       pointsRef.current.position.y = Math.cos(state.clock.elapsedTime * 3.0) * 0.03;
+      pointsRef.current.position.z = Math.cos(state.clock.elapsedTime * 3.0) * 0.03;
     } else {
       pointsRef.current.position.set(0, 0, 0);
     }
@@ -322,7 +375,7 @@ export default function Home() {
         {/* [페이지 1] 메인 타이틀 */}
         <div id='page-1' style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ textAlign: 'center', color: 'white', pointerEvents: 'none' }}>
-            <h1 style={{ fontSize: '5rem', fontWeight: '800', margin: 0 }}>AHA! 학습코치</h1>
+            <h1 style={{ fontSize: '5rem', fontWeight: '800', margin: 0 }}>AHA! <br /> 학습코치</h1>
             <p style={{ fontSize: '1.3rem', opacity: 0.6 }}>Scroll Down</p>
             <div style={{ margin: '15px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
               <div style={{ width: '30px', height: '1px', background: 'white', opacity: 0.2 }}></div>
@@ -344,20 +397,8 @@ export default function Home() {
           zIndex: 10 
         }}>
 
-
-
           {/* 부모의 상태를 ChatBot에도 전달해야 연동됩니다 */}
           <ChatBot isLoading={isLoading} setIsLoading={setIsLoading} />
-        </div>
-
-        {/* [페이지 3] 연락처 (중앙 배치) */}
-        <div id="page-3" style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ textAlign: 'center' }}>
-            <h2 style={{ fontSize: '4rem', color: '#4facfe', fontWeight: '900' }}>
-              현재 안 쓰이는 페이지
-            </h2>
-            <PageButton label="처음으로" pageIndex={0} />
-          </div>
         </div>
 
       </Scroll>
@@ -367,10 +408,10 @@ export default function Home() {
     {/* 4. 후처리 효과 */}
     <EffectComposer>
       <Bloom 
-        luminanceThreshold={0.5} 
+        luminanceThreshold={0.2} 
         mipmapBlur 
         intensity={0.5} 
-        radius={0.6} 
+        radius={0.2} 
       />
     </EffectComposer>
 
