@@ -1,213 +1,316 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+
+// ==============================================================================
+// 0. [타입 정의]
+// ==============================================================================
+interface Message {
+  role: string;
+  text: string;
+}
+
+interface ChatItem {
+  id: number;
+  title: string;
+  messages: Message[];
+}
 
 interface ChatBotProps {
   isLoading: boolean;
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
+// ==============================================================================
+// 1. [스타일 정의] (기존과 동일)
+// ==============================================================================
+const theme = {
+  container: {
+    width: '100%', maxWidth: '1550px', height: '90vh', maxHeight: '800px',
+    background: 'rgba(255, 255, 255, 0.05)', backdropFilter: 'blur(15px)',
+    borderRadius: '20px', border: '1px solid rgba(255, 255, 255, 0.1)',
+    display: 'flex', flexDirection: 'row' as const, overflow: 'hidden',
+    boxShadow: '0 20px 50px rgba(0,0,0,0.3)', color: 'white', margin: '20px auto',boxSizing: 'border-box' as const, // 패딩 포함해서 크기 계산 (필수)
+    minWidth: 0              // 좁은 화면에서 입력창이 무조건 줄어들게 허용 (중요)
+  },
+  sidebar: {
+    width: '25%',            // 고정 px 대신 % 사용 (전체 화면의 1/4)
+    maxWidth: '240px',       // 대신 PC에서 너무 커지면 안되니까 최대치 제한
+    minWidth: '80px',       // 너무 작아서 글자가 깨지는 것 방지
+    background: 'rgba(0, 0, 0, 0.2)', 
+    borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+    display: 'flex', 
+    flexDirection: 'column' as const, 
+    padding: '10px',         // 패딩도 조금 줄임
+    flexShrink: 0,            // 사이드바가 찌그러지지 않게 고정
+    boxSizing: 'border-box' as const // 패딩이 너비에 포함되도록
+  },
+  button: {
+    padding: '12px', background: '#007AFF', color: 'white', 
+    border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem',width: '5%',minWidth: '60px'
+  },
+  bubbleBase: {
+    padding: '10px 15px', 
+    borderRadius: '18px', 
+    maxWidth: '90%',
+    fontSize: '1rem', 
+    lineHeight: '1.5', 
+    wordBreak: 'break-word' as const,
+    
+    // ▼▼▼ 이 두 줄을 추가해 주세요 ▼▼▼
+    width: 'fit-content' as const,    // 내용물 길이에 딱 맞게 박스 축소
+    display: 'block' as const         // 내부 요소(마크다운 등)가 박스를 키우지 못하게 방어
+  },
+  input: {
+    flex: 1, 
+    padding: '12px 16px', 
+    background: 'rgba(255,255,255,0.1)',
+    border: 'none', 
+    borderRadius: '12px', 
+    color: 'white', 
+    fontSize: '1rem', 
+    outline: 'none',
+    
+    // ▼▼▼ 이 3줄을 꼭 넣어주세요! (이게 핵심입니다) ▼▼▼
+    minWidth: 0,                 // 1. "공간 없으면 0px까지 줄어들어라" (고집 꺾기)
+    width: '100%',               // 2. 부모 박스 안에서 꽉 차게
+    boxSizing: 'border-box' as const // 3. 패딩 때문에 뚱뚱해지지 않게
+  },
+  historyItem: {
+    padding: '12px',
+    background: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: '10px',
+    fontSize: '0.85rem',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap' as const,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    transition: 'background 0.2s',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center' // 삭제 버튼 배치를 위해 수정
+  }
+};
+
+const getStyle = (base: React.CSSProperties, overrides?: React.CSSProperties) => {
+  return { ...base, ...overrides };
+};
+
+// ==============================================================================
+// 2. [API 함수] n8n 통신
+// ==============================================================================
+async function fetchMessageFromN8N(chatInput: string) {
+  try {
+    const N8N_WEBHOOK_URL = "https://gilhwan0525.app.n8n.cloud/webhook-test/Aha";
+    const response = await fetch(N8N_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatInput }),
+    });
+
+    if (!response.ok) throw new Error("네트워크 응답 실패");
+
+    const data = await response.json();
+    const result = Array.isArray(data) ? data[0] : data;
+    // output 혹은 text 필드 등 n8n 설정에 맞는 필드 확인 필요
+    return result.explanation_text || result.raw_text || result.output || "응답 내용이 없습니다.";
+
+  } catch (error) {
+    console.error("API 에러:", error);
+    throw error;
+  }
+}
+
+// ==============================================================================
+// 3. [메인 컴포넌트] ChatBot
+// ==============================================================================
 export function ChatBot({ isLoading, setIsLoading }: ChatBotProps) {
-  const [messages, setMessages] = useState<{ role: string; text: string }[]>([
-    { role: 'ai', text: '안녕하세요! 무엇이든 물어보세요.' }
+
+  // [1] 대화 기록 State (초기값: 로컬 스토리지에서 불러오기)
+  const [chatHistory, setChatHistory] = useState<ChatItem[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('aha_chat_history');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+
+  const [messages, setMessages] = useState<Message[]>([
+    { role: 'ai', text: '안녕하세요! 시작해야하는 프로젝트나 해결하고 싶은 문제를 적어주세요.' }
   ]);
   const [inputValue, setInputValue] = useState("");
-  
-  // 자동 스크롤을 위한 참조(Ref) 추가
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // 메시지가 추가될 때마다 바닥으로 스크롤 내리기
+  // [2] chatHistory가 변할 때마다 로컬 스토리지에 자동 저장
+  useEffect(() => {
+    localStorage.setItem('aha_chat_history', JSON.stringify(chatHistory));
+  }, [chatHistory]);
+
+  // 자동 스크롤
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, isLoading]);
 
+
+  // [핵심] 중복 방지 및 새 대화 로직
+  const handleNewChat = () => {
+    // 1. 현재 대화가 "기본 인사말"만 있거나 "비어있으면" 저장 안 함
+    if (messages.length <= 1) {
+      setMessages([{ role: 'ai', text: '안녕하세요! 새로운 대화를 시작합니다.' }]);
+      return;
+    }
+
+    const currentTitle = messages.find(m => m.role === 'user')?.text.substring(0, 15) || "새 대화";
+
+    // 2. [중복 방지] 가장 최근 기록과 제목이 같다면 저장 안 함 (선택 사항)
+    // (완벽히 막으려면 내용까지 비교해야 하지만, 보통 제목 비교로 충분합니다)
+    if (chatHistory.length > 0 && chatHistory[0].title === currentTitle) {
+      setMessages([{ role: 'ai', text: '안녕하세요! 새로운 대화를 시작합니다.' }]);
+      return; 
+    }
+
+    const newHistoryItem: ChatItem = {
+      id: Date.now(),
+      title: currentTitle,
+      messages: [...messages]
+    };
+
+    setChatHistory(prev => [newHistoryItem, ...prev]);
+    setMessages([{ role: 'ai', text: '안녕하세요! 새로운 대화를 시작합니다.' }]);
+    setInputValue("");
+  };
+
+  // 기록 삭제 기능 (혹시 몰라 추가했습니다)
+  const deleteChat = (e: React.MouseEvent, id: number) => {
+    e.stopPropagation(); // 부모 클릭 이벤트 방지
+    setChatHistory(prev => prev.filter(chat => chat.id !== id));
+  };
+
+  const loadChat = (historyMessages: Message[]) => {
+    setMessages(historyMessages);
+  };
+
   const handleSend = async () => {
     if (!inputValue.trim() || isLoading) return;
 
-    const userMsg = { role: 'user', text: inputValue };
-    setMessages(prev => [...prev, userMsg]);
+    const currentInput = inputValue;
+    setMessages(prev => [...prev, { role: 'user', text: currentInput }]);
     setInputValue("");
     setIsLoading(true);
 
     try {
-      const N8N_WEBHOOK_URL = "https://gilhwan0525.app.n8n.cloud/webhook/Aha";
-      const response = await fetch(N8N_WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatInput: inputValue }),
-    });
-
-      if (!response.ok) throw new Error("네트워크 응답이 좋지 않습니다.");
-
-        const data = await response.json();
-        console.log("n8n에서 온 데이터:", data); // Array(1) 확인용
-
-        // 1. 배열 형태인지 확인하고 첫 번째 항목을 가져옵니다.
-        const result = Array.isArray(data) ? data[0] : data;
-
-        // 2. 만약 n8n에서 'error' 필드가 왔다면 raw_text를 보여주도록 방어 코드를 짭니다.
-        const finalMessage = result.explanation_text || result.raw_text || "응답 내용이 비어있습니다.";
-
-        setMessages(prev => [...prev, { 
-        role: 'ai', 
-        text: finalMessage 
-        }]);
-        // 파싱 실패 시에도 텍스트가 나올 수 있도록 fallback 설정
-        const textToDisplay = result.explanation_text || result.raw_text || "답변을 가져오지 못했습니다.";
-
-
-        console.log("n8n에서 온 데이터:", data);
-
-        // 3. 머메이드 코드는 나중에 렌더링을 위해 콘솔에만 찍어둡니다.
-        if (result.mermaid_code) {
-        console.log("받은 머메이드 코드:", result.mermaid_code);
-        }
-
+      const aiResponseText = await fetchMessageFromN8N(currentInput);
+      setMessages(prev => [...prev, { role: 'ai', text: aiResponseText }]);
     } catch (error) {
-      console.error("n8n 연결 에러:", error);
-      setMessages(prev => [...prev, { role: 'ai', text: "연결에 실패했어요. n8n 서버를 확인해주세요!" }]);
+      setMessages(prev => [...prev, { role: 'ai', text: "연결에 실패했어요." }]);
     } finally {
       setIsLoading(false);
     }
   };
-return (
-    <div style={{
-      width: '120%',            // 모바일에서 양옆에 약간의 여백을 줌
-      maxWidth: '1500px',
-      height: '90vh',          // 고정 px 대신 화면 높이의 80%를 사용 (중요!)
-      maxHeight: '800px',      // 너무 커지지 않게 최대치만 제한
-      background: 'rgba(255, 255, 255, 0.05)',
-      backdropFilter: 'blur(15px)',
-      borderRadius: '20px',
-      border: '1px solid rgba(255, 255, 255, 0.1)',
-      display: 'flex',
-      flexDirection: 'row',
-      overflow: 'hidden',
-      pointerEvents: 'auto',
-      boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
-      color: 'white',
-      margin: '0 auto'         // 화면 가운데 정렬
-    }}>
 
-  {/* --- 왼쪽 사이드바 추가 --- */}
-  <div style={{
-    width: '10vw',
-    minWidth: '30px',    // 너무 작아지지는 않게 최소치만 설정
-    background: 'rgba(0, 0, 0, 0.2)',
-    borderRight: '1px solid rgba(255, 255, 255, 0.1)',
-    display: 'flex',
-    flexDirection: 'column',
-    padding: '20px',
-    flexShrink: 0 // 사이드바 크기 고정
-  }}>
-    <button style={{
-      padding: '12px', background: '#007AFF', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', marginBottom: '10px'
-    }}>+ 새 대화</button>
-    <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', marginBottom: '10px' }}>최근 대화</div>
-    <div style={{ padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', fontSize: '0.9rem', cursor: 'pointer' }}>
-      임시 대화 기록 1
-    </div>
-  </div>
-
-
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-      {/* 헤더 */}
-      <div style={{ padding: '20px', borderBottom: '1px solid rgba(255,255,255,0.1)', fontWeight: 'bold', textAlign: 'center' }}>
-        AHA! 학습 코치 (n8n 연결됨)
-      </div>
-
-{/* 메시지창 - scrollRef 연결 */}
-      <div 
-        ref={scrollRef}
-        style={{ 
-          flex: 1, 
-          padding: '15px', // 패딩 약간 축소
-          overflowY: 'auto', 
-          display: 'flex', 
-          flexDirection: 'column', 
-          gap: '10px' // 간격 미세 조정
-        }}
-      >
-        {messages.map((msg, i) => (
-          <div key={i} style={{
-            alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-            background: msg.role === 'user' ? '#007AFF' : 'rgba(36, 36, 36, 0.9)',
-            padding: '10px 14px', // 모바일 가독성을 위해 패딩 최적화
-            borderRadius: '18px',
-            borderBottomRightRadius: msg.role === 'user' ? '4px' : '18px',
-            borderBottomLeftRadius: msg.role === 'ai' ? '4px' : '18px',
-            maxWidth: '90%', // 모바일에서 너무 좁지 않게 확장
-            fontSize: '1rem', // 표준 크기로 조정
-            lineHeight: '1.5', // 가독성 향상
-            wordBreak: 'break-word' // 긴 단어 깨짐 방지
-          }}>
-            {msg.text}
-          </div>
-        ))}
-        {isLoading && (
-          <div style={{ 
-            opacity: 0.5, 
-            fontSize: '0.85rem', 
-            paddingLeft: '5px' 
-          }}>
-            AI가 생각 중입니다...
-          </div>
-        )}
-      </div>
-
-      {/* 입력창 영역 */}
-      <div style={{ 
-        padding: '12px 15px', // 위아래 여백 최적화
-        background: 'rgba(0,0,0,0.2)',
-        borderTop: '1px solid rgba(255,255,255,0.05)',
-        width: '100%',        // 부모 너비에 맞춤
-        boxSizing: 'border-box' // 패딩이 너비에 포함되도록 설정 (매우 중요!)
-      }}>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%'}}>
-          <input 
-            type="text" 
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSend(); }}
-            placeholder={isLoading ? "생각 중..." : "메시지 입력..."}
-            disabled={isLoading}
-            style={{ 
-              flex: 1, 
-              minWidth: 0,     // flex 아이템이 부모를 뚫고 나가는 현상 방지
-              padding: '12px 16px', // 모바일에서 너무 크지 않게 조정
-              background: 'rgba(255,255,255,0.1)', 
-              border: 'none', 
-              borderRadius: '12px',
-              color: 'white', 
-              fontSize: '1rem', // 모바일 자동 줌 방지를 위해 1rem 유지
-              outline: 'none',
-              WebkitAppearance: 'none' // iOS 입력창 기본 스타일 제거
-            }}
-          />
-          
-          <button 
-            onClick={handleSend}
-            disabled={isLoading}
-            style={{
-              padding: '12px 18px',
-              background: isLoading ? 'rgba(255,255,255,0.1)' : '#007AFF',
-              color: 'white',
-              border: 'none',
-              borderRadius: '12px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              transition: 'all 0.2s',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minWidth: '60px' // 버튼이 너무 작아지지 않게 고정
-            }}
-          >
-            {isLoading ? "..." : "전송"}
-          </button>
+  return (
+    <div style={getStyle(theme.container)}>
+      
+      {/* --- 왼쪽 사이드바 --- */}
+      <div style={getStyle(theme.sidebar)}>
+        <button 
+          onClick={handleNewChat}
+          style={getStyle(theme.button, { marginBottom: '20px', width: '100%' })}
+        >
+          + 새 대화 시작
+        </button>
+        
+        <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', marginBottom: '10px' }}>최근 대화</div>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto' }}>
+          {chatHistory.length === 0 ? (
+            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.2)', textAlign: 'center', marginTop: '10px' }}>
+              기록이 없습니다.
+            </div>
+          ) : (
+            chatHistory.map((chat) => (
+              <div 
+                key={chat.id}
+                onClick={() => loadChat(chat.messages)}
+                style={getStyle(theme.historyItem)}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.15)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '120px' }}>
+                  📄 {chat.title}
+                </span>
+                {/* 삭제 버튼 (X) */}
+                <span 
+                  onClick={(e) => deleteChat(e, chat.id)}
+                  style={{ color: 'rgba(255,255,255,0.3)', padding: '0 5px', fontSize: '10px',  }}
+                >
+                  ✕
+                </span>
+              </div>
+            ))
+          )}
         </div>
       </div>
-    </div>
+
+      {/* --- 오른쪽 채팅 영역 --- */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div style={{ padding: '20px', borderBottom: '1px solid rgba(255,255,255,0.1)', fontWeight: 'bold', textAlign: 'center' }}>
+          AHA! 학습 코치
+        </div>
+
+        <div ref={scrollRef} style={{ flex: 1, padding: '15px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {messages.map((msg, i) => {
+            const isUser = msg.role === 'user';
+            return (
+              <div key={i} style={getStyle(theme.bubbleBase, {
+                alignSelf: isUser ? 'flex-end' : 'flex-start',
+                background: isUser ? '#007AFF' : 'rgba(36, 36, 36, 0.9)',
+                borderBottomRightRadius: isUser ? '4px' : '18px',
+                borderBottomLeftRadius: isUser ? '18px' : '4px'
+              })}>
+                {/* 텍스트 줄바꿈 처리 (중요) */}
+                {/* 2. 일반 텍스트 대신 ReactMarkdown 사용 */}
+              {isUser ? (
+                <div style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</div>
+              ) : (
+                <div className="markdown-container" style={{ fontSize: '1rem' }}>
+                  <ReactMarkdown components={{
+                    p: ({node, ...props}) => <p style={{ margin: 0 }} {...props} /> // 위아래 여백 제거!
+                  }}>
+                    {msg.text}
+                  </ReactMarkdown>
+                </div>
+              )}
+            </div>
+          );
+          })}
+          {isLoading && <div style={{ opacity: 0.5, fontSize: '0.85rem', padding: '10px' }}>AI가 생각 중입니다...</div>}
+        </div>
+
+        <div style={{ padding: '12px 18px', background: 'rgba(0,0,0,0.2)', width: '100%', boxSizing: 'border-box' as const }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input 
+              type="text" 
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSend(); }}
+              placeholder={isLoading ? "생각 중..." : "메시지 입력..."}
+              disabled={isLoading}
+              style={getStyle(theme.input)} 
+            />
+        <button 
+        onClick={handleSend} 
+        disabled={isLoading}
+        style={getStyle(theme.button, { 
+          background: isLoading ? 'rgba(255,255,255,0.1)' : '#007AFF' 
+        })}
+      >
+        전송
+      </button>
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }

@@ -342,15 +342,15 @@ export default function Home() {
       <UnifiedButton 
   label={`다음 모델 (${currentIndex + 1}/${models.length})`} 
   onClick={nextModel} 
-  style={{ position: 'fixed', top: '85px', right: '30px' }} 
+  style={{ position: 'fixed', top: '1%', right: '2%' }} 
 />
 
 
   {/* 1. 고정 버튼 */}
   <UnifiedButton 
-  label="테마 변경" 
+  label="색상 변경" 
   onClick={changeTheme} 
-  style={{ position: 'fixed', top: '30px', right: '30px' }} 
+  style={{ position: 'fixed', top: '10%', right: '2%' }} 
 />
   <Canvas>
     {/* 2. 파티클 (Suspense로 감싸서 로딩 에러 방지) */}

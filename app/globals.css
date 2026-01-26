@@ -41,3 +41,50 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* --- 마크다운 답변 스타일링 --- */
+
+/* 1. 전체적인 줄간격과 가독성 */
+.markdown-container {
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+/* 2. 제목 스타일 (글자 크기 및 여백) */
+.markdown-container h1, 
+.markdown-container h2, 
+.markdown-container h3 {
+  color: #ffffff;
+  margin-top: 16px;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.markdown-container h1 { font-size: 1.4rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px; }
+.markdown-container h2 { font-size: 1.2rem; }
+.markdown-container h3 { font-size: 1.1rem; }
+
+/* 3. 리스트 스타일 (점과 번호가 말풍선 안으로 들어오게) */
+.markdown-container ul, 
+.markdown-container ol {
+  padding-left: 20px;
+  margin: 8px 0;
+}
+
+.markdown-container li {
+  margin-bottom: 4px;
+}
+
+/* 4. 코드 블록 (명령어나 수식 등) */
+.markdown-container code {
+  background: rgba(255, 255, 255, 0.15);
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.9em;
+}
+
+/* 5. 문단 사이 간격 */
+.markdown-container p {
+  margin-bottom: 10px;
+}
