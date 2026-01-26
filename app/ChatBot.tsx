@@ -72,22 +72,45 @@ export function ChatBot({ isLoading, setIsLoading }: ChatBotProps) {
   };
 return (
     <div style={{
-      width: '95%',            // 모바일에서 양옆에 약간의 여백을 줌
-      maxWidth: '1000px',
-      height: '80vh',          // 고정 px 대신 화면 높이의 80%를 사용 (중요!)
+      width: '120%',            // 모바일에서 양옆에 약간의 여백을 줌
+      maxWidth: '1500px',
+      height: '90vh',          // 고정 px 대신 화면 높이의 80%를 사용 (중요!)
       maxHeight: '800px',      // 너무 커지지 않게 최대치만 제한
       background: 'rgba(255, 255, 255, 0.05)',
       backdropFilter: 'blur(15px)',
-      borderRadius: '28px',
+      borderRadius: '20px',
       border: '1px solid rgba(255, 255, 255, 0.1)',
       display: 'flex',
-      flexDirection: 'column',
+      flexDirection: 'row',
       overflow: 'hidden',
       pointerEvents: 'auto',
-      boxShadow: '0 25px 60px rgba(0,0,0,0.3)',
+      boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
       color: 'white',
       margin: '0 auto'         // 화면 가운데 정렬
     }}>
+
+  {/* --- 왼쪽 사이드바 추가 --- */}
+  <div style={{
+    width: '10vw',
+    minWidth: '30px',    // 너무 작아지지는 않게 최소치만 설정
+    background: 'rgba(0, 0, 0, 0.2)',
+    borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+    display: 'flex',
+    flexDirection: 'column',
+    padding: '20px',
+    flexShrink: 0 // 사이드바 크기 고정
+  }}>
+    <button style={{
+      padding: '12px', background: '#007AFF', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', marginBottom: '10px'
+    }}>+ 새 대화</button>
+    <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', marginBottom: '10px' }}>최근 대화</div>
+    <div style={{ padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', fontSize: '0.9rem', cursor: 'pointer' }}>
+      임시 대화 기록 1
+    </div>
+  </div>
+
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       {/* 헤더 */}
       <div style={{ padding: '20px', borderBottom: '1px solid rgba(255,255,255,0.1)', fontWeight: 'bold', textAlign: 'center' }}>
         AHA! 학습 코치 (n8n 연결됨)
@@ -108,7 +131,7 @@ return (
         {messages.map((msg, i) => (
           <div key={i} style={{
             alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-            background: msg.role === 'user' ? '#007AFF' : 'rgba(255,255,255,0.13)',
+            background: msg.role === 'user' ? '#007AFF' : 'rgba(36, 36, 36, 0.9)',
             padding: '10px 14px', // 모바일 가독성을 위해 패딩 최적화
             borderRadius: '18px',
             borderBottomRightRadius: msg.role === 'user' ? '4px' : '18px',
@@ -184,6 +207,7 @@ return (
           </button>
         </div>
       </div>
+    </div>
     </div>
   );
 }
