@@ -1,5 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';    // 추가
+import rehypeKatex from 'rehype-katex';  // 추가
+import 'katex/dist/katex.min.css';       // 추가 (수식 스타일)
 
 // ==============================================================================
 // 0. [타입 정의]
@@ -286,11 +289,15 @@ export function ChatBot({ isLoading, setIsLoading }: ChatBotProps) {
                 <div style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</div>
               ) : (
                 <div className="markdown-container" style={{ fontSize: '1rem' }}>
-                  <ReactMarkdown components={{
-                    p: ({node, ...props}) => <p style={{ margin: 0 }} {...props} /> // 위아래 여백 제거!
-                  }}>
-                    {msg.text}
-                  </ReactMarkdown>
+                  <ReactMarkdown
+            remarkPlugins={[remarkMath]}       // $ 기호를 수학으로 인식
+            rehypePlugins={[rehypeKatex]}     // 수학을 예쁘게 그려줌
+            components={{
+              p: ({node, ...props}) => <p style={{ margin: 0 }} {...props} />
+            }}
+          >
+            {msg.text}
+          </ReactMarkdown>
                 </div>
               )}
             </div>
