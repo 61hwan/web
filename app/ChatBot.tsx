@@ -97,21 +97,23 @@ const getStyle = (base: React.CSSProperties, overrides?: React.CSSProperties) =>
 // ==============================================================================
 // 2. [API 함수] n8n 통신
 // ==============================================================================
-async function fetchMessageFromN8N(chatInput: string) {
+async function fetchMessageFromN8N(chatInput: string, sessionId: string) {
   try {
-    const N8N_WEBHOOK_URL = "https://gilhwan0525.app.n8n.cloud/webhook-test/Aha";
+    const N8N_WEBHOOK_URL = "https://gilhwan0525.app.n8n.cloud/webhook/Aha"; // 본인 주소 확인
     const response = await fetch(N8N_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chatInput }),
+      
+      // [핵심] sessionId를 같이 보냅니다!
+      body: JSON.stringify({ chatInput, sessionId }),
     });
 
     if (!response.ok) throw new Error("네트워크 응답 실패");
 
     const data = await response.json();
     const result = Array.isArray(data) ? data[0] : data;
-    // output 혹은 text 필드 등 n8n 설정에 맞는 필드 확인 필요
-    return result.explanation_text || result.raw_text || result.output || "응답 내용이 없습니다.";
+    // n8n AI Agent 응답 필드 (output 또는 text)
+    return result.output || result.text || result.explanation_text || "응답 내용이 없습니다.";
 
   } catch (error) {
     console.error("API 에러:", error);
@@ -137,6 +139,8 @@ export function ChatBot({ isLoading, setIsLoading }: ChatBotProps) {
     { role: 'ai', text: '안녕하세요! 시작해야하는 프로젝트나 해결하고 싶은 문제를 적어주세요.' }
   ]);
   const [inputValue, setInputValue] = useState("");
+  // 현재 대화방 ID (없으면 현재 시간으로 생성)
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => String(Date.now()));
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // [2] chatHistory가 변할 때마다 로컬 스토리지에 자동 저장
@@ -153,53 +157,61 @@ export function ChatBot({ isLoading, setIsLoading }: ChatBotProps) {
 
 
   // [핵심] 중복 방지 및 새 대화 로직
+  // [3] 새 대화 시작 (ID 새로 발급)
   const handleNewChat = () => {
-    // 1. 현재 대화가 "기본 인사말"만 있거나 "비어있으면" 저장 안 함
     if (messages.length <= 1) {
       setMessages([{ role: 'ai', text: '안녕하세요! 새로운 대화를 시작합니다.' }]);
       return;
     }
 
     const currentTitle = messages.find(m => m.role === 'user')?.text.substring(0, 15) || "새 대화";
-
-    // 2. [중복 방지] 가장 최근 기록과 제목이 같다면 저장 안 함 (선택 사항)
-    // (완벽히 막으려면 내용까지 비교해야 하지만, 보통 제목 비교로 충분합니다)
+    const newId = String(Date.now());
+    setActiveSessionId(newId);
+    
     if (chatHistory.length > 0 && chatHistory[0].title === currentTitle) {
       setMessages([{ role: 'ai', text: '안녕하세요! 새로운 대화를 시작합니다.' }]);
       return; 
     }
 
     const newHistoryItem: ChatItem = {
-      id: Date.now(),
+      id: Number(activeSessionId), // 현재 세션 ID로 저장
       title: currentTitle,
       messages: [...messages]
     };
 
     setChatHistory(prev => [newHistoryItem, ...prev]);
+    
+    // 리셋
     setMessages([{ role: 'ai', text: '안녕하세요! 새로운 대화를 시작합니다.' }]);
     setInputValue("");
+    setActiveSessionId(String(Date.now())); // ★ 새 ID 발급
   };
 
-  // 기록 삭제 기능 (혹시 몰라 추가했습니다)
+  // 기록 삭제
   const deleteChat = (e: React.MouseEvent, id: number) => {
-    e.stopPropagation(); // 부모 클릭 이벤트 방지
+    e.stopPropagation();
     setChatHistory(prev => prev.filter(chat => chat.id !== id));
   };
 
-  const loadChat = (historyMessages: Message[]) => {
+  // 대화 불러오기 (ID 교체)
+  const loadChat = (historyMessages: Message[], id: number) => {
     setMessages(historyMessages);
+    setActiveSessionId(String(id)); // 클릭한 방의 ID로 교체!
   };
 
+  // 메시지 전송
   const handleSend = async () => {
     if (!inputValue.trim() || isLoading) return;
 
     const currentInput = inputValue;
+    const currentId = activeSessionId; // 현재 ID 캡처
+
     setMessages(prev => [...prev, { role: 'user', text: currentInput }]);
     setInputValue("");
     setIsLoading(true);
 
     try {
-      const aiResponseText = await fetchMessageFromN8N(currentInput);
+      const aiResponseText = await fetchMessageFromN8N(currentInput, currentId);
       setMessages(prev => [...prev, { role: 'ai', text: aiResponseText }]);
     } catch (error) {
       setMessages(prev => [...prev, { role: 'ai', text: "연결에 실패했어요." }]);
@@ -231,7 +243,7 @@ export function ChatBot({ isLoading, setIsLoading }: ChatBotProps) {
             chatHistory.map((chat) => (
               <div 
                 key={chat.id}
-                onClick={() => loadChat(chat.messages)}
+                onClick={() => loadChat(chat.messages, chat.id)}
                 style={getStyle(theme.historyItem)}
                 onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.15)')}
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
